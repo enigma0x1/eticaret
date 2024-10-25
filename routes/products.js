@@ -1,6 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const Product = require('../models/Product');
+const verifyToken = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+
+// Multer konfigürasyonu
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({ storage: storage });
 
 // Tüm ürünleri getir
 router.get('/', async (req, res) => {
@@ -13,8 +28,12 @@ router.get('/', async (req, res) => {
 });
 
 // Yeni ürün ekle
-router.post('/', async (req, res) => {
-    const product = new Product(req.body);
+router.post('/', verifyToken, upload.single('image'), async (req, res) => {
+    const product = new Product({
+        ...req.body,
+        image: req.file.filename
+    });
+
     try {
         const newProduct = await product.save();
         res.status(201).json(newProduct);
@@ -23,12 +42,27 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Tek ürün getir
-router.get('/:id', async (req, res) => {
+// Ürün ara
+router.get('/search', async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ message: 'Ürün bulunamadı' });
-        res.json(product);
+        const searchTerm = req.query.q;
+        const products = await Product.find({
+            $or: [
+                { title: { $regex: searchTerm, $options: 'i' } },
+                { description: { $regex: searchTerm, $options: 'i' } }
+            ]
+        });
+        res.json(products);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Kategori bazlı ürünler
+router.get('/category/:category', async (req, res) => {
+    try {
+        const products = await Product.find({ category: req.params.category });
+        res.json(products);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
