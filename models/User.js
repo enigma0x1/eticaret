@@ -1,10 +1,9 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-    username: {
+    name: {
         type: String,
-        required: true,
-        unique: true
+        required: true
     },
     email: {
         type: String,
@@ -15,10 +14,25 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    isAdmin: {
+    userType: {
+        type: String,
+        enum: ['professional', 'manufacturer', 'user'],
+        required: true
+    },
+    profession: {
+        type: String,
+        required: function() {
+            return this.userType === 'professional';
+        }
+    },
+    verified: {
         type: Boolean,
         default: false
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now
     }
-}, { timestamps: true });
+});
 
 module.exports = mongoose.model('User', userSchema);
