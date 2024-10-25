@@ -3,8 +3,9 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const authRoute = require('./routes/auth');
+const productsRoute = require('./routes/products'); // Yeni eklendi
+const cartRoute = require('./routes/cart'); // Yeni eklendi
 const verifyToken = require('./middleware/auth');
-
 const path = require('path');
 
 dotenv.config();
@@ -13,8 +14,6 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Static dosyalar için middleware
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // MongoDB Connection
@@ -24,6 +23,8 @@ mongoose.connect(process.env.MONGO_URL)
 
 // Routes
 app.use('/api/auth', authRoute);
+app.use('/api/products', productsRoute); // Yeni eklendi
+app.use('/api/cart', cartRoute); // Yeni eklendi
 
 // Test Routes
 app.get('/test', (req, res) => {
@@ -45,7 +46,6 @@ app.use((req, res) => {
     res.status(404).json({ message: 'Sayfa bulunamadı!' });
 });
 
-// Server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
