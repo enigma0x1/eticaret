@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const productRoutes = require('./routes/products');
 
 const app = express();
 const port = process.env.PORT || 10000;
@@ -14,10 +15,8 @@ mongoose.connect(process.env.MONGODB_URI)
 app.use(cors());
 app.use(express.json());
 
-// Test endpoint
-app.get('/api/test', (req, res) => {
-    res.json({ message: 'Backend API test endpoint çalışıyor!' });
-});
+// Routes
+app.use('/api/products', productRoutes);
 
 app.listen(port, () => {
     console.log(`Server ${port} portunda çalışıyor`);
