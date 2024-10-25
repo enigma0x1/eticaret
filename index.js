@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const authRoute = require('./routes/auth');
 const verifyToken = require('./middleware/auth');
+
 const path = require('path');
 
 dotenv.config();
