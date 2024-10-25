@@ -1,58 +1,95 @@
-const router = require('express').Router();
-const path = require('path');
-const User = require(path.resolve(__dirname, '..', 'models', 'User'));
-const bcrypt = require('bcrypt');
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
-// Hata ayıklama için log ekleyelim
-console.log('Models dizini:', path.resolve(__dirname, '..', 'models'));
-console.log('User model yolu:', path.resolve(__dirname, '..', 'models', 'User'));
-
-// Register
+// REGISTER (SIGNUP)
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { name, email, password, userType, profession } = req.body;
+
+        // Email kontrolü
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'Bu email adresi zaten kullanımda' });
+        }
+
+        // Şifreyi hash'le
         const hashedPassword = await bcrypt.hash(password, 10);
-        
-        const newUser = new User({
-            username,
+
+        // Yeni kullanıcı oluştur
+        const user = new User({
+            name,
             email,
-            password: hashedPassword
+            password: hashedPassword,
+            userType,
+            profession,
+            verified: false
         });
 
-        const savedUser = await newUser.save();
-        res.status(201).json(savedUser);
-    } catch (err) {
-        console.error('Register hatası:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
+        await user.save();
 
-// Login
-router.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        const user = await User.findOne({ email });
-        
-        if (!user) {
-            return res.status(404).json({ message: "Kullanıcı bulunamadı" });
-        }
-
-        const validPassword = await bcrypt.compare(password, user.password);
-        if (!validPassword) {
-            return res.status(400).json({ message: "Geçersiz şifre" });
-        }
-
+        // Token oluştur
         const token = jwt.sign(
-            { id: user._id },
+            { userId: user._id, userType: user.userType },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        res.status(200).json({ user, token });
-    } catch (err) {
-        console.error('Login hatası:', err);
-        res.status(500).json({ error: err.message });
+        res.status(201).json({
+            message: 'Kullanıcı başarıyla oluşturuldu',
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                userType: user.userType
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// LOGIN
+router.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // Kullanıcıyı bul
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(400).json({ message: 'Kullanıcı bulunamadı' });
+        }
+
+        // Şifreyi kontrol et
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
+            return res.status(400).json({ message: 'Geçersiz şifre' });
+        }
+
+        // Token oluştur
+        const token = jwt.sign(
+            { userId: user._id, userType: user.userType },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            message: 'Giriş başarılı',
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                userType: user.userType
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 });
 
