@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const User = require('../models/User');
+const verifyToken = require('../middleware/auth');
 
 // Multer konfigürasyonu
 const storage = multer.diskStorage({
