@@ -1,7 +1,12 @@
 const router = require('express').Router();
-const User = require('../models/User');
+const path = require('path');
+const User = require(path.resolve(__dirname, '..', 'models', 'User'));
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+
+// Hata ayıklama için log ekleyelim
+console.log('Models dizini:', path.resolve(__dirname, '..', 'models'));
+console.log('User model yolu:', path.resolve(__dirname, '..', 'models', 'User'));
 
 // Register
 router.post('/register', async (req, res) => {
@@ -18,6 +23,7 @@ router.post('/register', async (req, res) => {
         const savedUser = await newUser.save();
         res.status(201).json(savedUser);
     } catch (err) {
+        console.error('Register hatası:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -45,6 +51,7 @@ router.post('/login', async (req, res) => {
 
         res.status(200).json({ user, token });
     } catch (err) {
+        console.error('Login hatası:', err);
         res.status(500).json({ error: err.message });
     }
 });
