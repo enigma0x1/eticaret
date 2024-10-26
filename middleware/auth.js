@@ -1,36 +1,109 @@
+// middleware/auth.js
 const jwt = require('jsonwebtoken');
+const Manufacturer = require('../models/Manufacturer');
+const Professional = require('../models/Professional');
 
-const verifyToken = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ message: "Token formatı geçersiz" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-        return res.status(401).json({ message: "Token bulunamadı" });
-    }
-
+// Üretici token doğrulama
+const verifyManufacturer = async (req, res, next) => {
     try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        if (!token) {
+            return res.status(401).json({ message: 'Lütfen giriş yapın' });
+        }
+
+        // Token'ı doğrula
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded;
+        
+        // Üretici kontrolü
+        const manufacturer = await Manufacturer.findOne({ 
+            _id: decoded._id,
+            'tokens.token': token 
+        });
+
+        if (!manufacturer) {
+            throw new Error();
+        }
+
+        // Request'e üretici ve token bilgilerini ekle
+        req.token = token;
+        req.manufacturer = manufacturer;
         next();
-    } catch (err) {
-        return res.status(403).json({ message: "Geçersiz token" });
+    } catch (error) {
+        res.status(401).json({ message: 'Lütfen üretici olarak giriş yapın' });
     }
 };
 
-const verifyManufacturer = (req, res, next) => {
-    verifyToken(req, res, () => {
-        if (req.user.userType === 'manufacturer') {
-            next();
-        } else {
-            return res.status(403).json({ message: "Bu işlem için üretici yetkisi gerekli" });
+// Profesyonel token doğrulama
+const verifyProfessional = async (req, res, next) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        if (!token) {
+            return res.status(401).json({ message: 'Lütfen giriş yapın' });
         }
-    });
+
+        // Token'ı doğrula
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        // Profesyonel kontrolü
+        const professional = await Professional.findOne({ 
+            _id: decoded._id,
+            'tokens.token': token 
+        });
+
+        if (!professional) {
+            throw new Error();
+        }
+
+        // Request'e profesyonel ve token bilgilerini ekle
+        req.token = token;
+        req.professional = professional;
+        next();
+    } catch (error) {
+        res.status(401).json({ message: 'Lütfen profesyonel olarak giriş yapın' });
+    }
+};
+
+// Her iki tip için de geçerli genel auth kontrolü
+const auth = async (req, res, next) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        if (!token) {
+            return res.status(401).json({ message: 'Lütfen giriş yapın' });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        // Önce üretici olarak kontrol et
+        let user = await Manufacturer.findOne({ 
+            _id: decoded._id,
+            'tokens.token': token 
+        });
+
+        // Üretici değilse profesyonel olarak kontrol et
+        if (!user) {
+            user = await Professional.findOne({ 
+                _id: decoded._id,
+                'tokens.token': token 
+            });
+        }
+
+        if (!user) {
+            throw new Error();
+        }
+
+        req.token = token;
+        req.user = user;
+        next();
+    } catch (error) {
+        res.status(401).json({ message: 'Lütfen giriş yapın' });
+    }
 };
 
 module.exports = {
-    verifyToken,
-    verifyManufacturer
+    verifyManufacturer,
+    verifyProfessional,
+    auth
 };
