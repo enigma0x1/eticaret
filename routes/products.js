@@ -4,6 +4,12 @@ const Product = require('../models/Product');
 const { verifyToken, verifyManufacturer } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+
+// Uploads klasörünü oluştur
+if (!fs.existsSync('uploads')) {
+    fs.mkdirSync('uploads');
+}
 
 // Multer konfigürasyonu
 const storage = multer.diskStorage({
@@ -11,19 +17,40 @@ const storage = multer.diskStorage({
         cb(null, 'uploads/');
     },
     filename: function (req, file, cb) {
-        cb(null, Date.now() + path.extname(file.originalname));
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
     }
 });
 
-const upload = multer({ storage: storage });
+const fileFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Sadece resim dosyaları yüklenebilir.'), false);
+    }
+};
+
+const upload = multer({ 
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+    }
+});
 
 // Tüm ürünleri getir (public)
 router.get('/', async (req, res) => {
     try {
-        const products = await Product.find();
-        res.json(products);
+        const products = await Product.find().populate('manufacturer', 'companyName');
+        res.json({
+            success: true,
+            products
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -31,9 +58,15 @@ router.get('/', async (req, res) => {
 router.get('/my-products', verifyManufacturer, async (req, res) => {
     try {
         const products = await Product.find({ manufacturer: req.user.id });
-        res.json(products);
+        res.json({
+            success: true,
+            products
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -46,20 +79,35 @@ router.get('/search', async (req, res) => {
                 { title: { $regex: searchTerm, $options: 'i' } },
                 { description: { $regex: searchTerm, $options: 'i' } }
             ]
+        }).populate('manufacturer', 'companyName');
+        
+        res.json({
+            success: true,
+            products
         });
-        res.json(products);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
 // Kategori bazlı ürünler
 router.get('/category/:category', async (req, res) => {
     try {
-        const products = await Product.find({ category: req.params.category });
-        res.json(products);
+        const products = await Product.find({ category: req.params.category })
+            .populate('manufacturer', 'companyName');
+        
+        res.json({
+            success: true,
+            products
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -108,31 +156,58 @@ router.get('/filter', async (req, res) => {
                 sortQuery = { createdAt: -1 };
         }
 
-        const products = await Product.find(query).sort(sortQuery);
-        res.json(products);
+        const products = await Product.find(query)
+            .sort(sortQuery)
+            .populate('manufacturer', 'companyName');
+
+        res.json({
+            success: true,
+            products
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
 // Yeni ürün ekle (sadece manufacturer)
 router.post('/', verifyManufacturer, upload.single('image'), async (req, res) => {
-    const product = new Product({
-        ...req.body,
-        manufacturer: req.user.id,
-        image: req.file.filename
-    });
-
     try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Ürün görseli gereklidir'
+            });
+        }
+
+        const product = new Product({
+            title: req.body.title,
+            description: req.body.description,
+            price: req.body.price,
+            category: req.body.category,
+            modelFormats: JSON.parse(req.body.modelFormats),
+            manufacturer: req.user.id,
+            image: `/uploads/${req.file.filename}`
+        });
+
         const newProduct = await product.save();
-        res.status(201).json(newProduct);
+        res.status(201).json({
+            success: true,
+            product: newProduct
+        });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        console.error('Product creation error:', error);
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
 // Ürün güncelle (sadece kendi ürünlerini)
-router.put('/:id', verifyManufacturer, async (req, res) => {
+router.put('/:id', verifyManufacturer, upload.single('image'), async (req, res) => {
     try {
         const product = await Product.findOne({ 
             _id: req.params.id,
@@ -140,14 +215,43 @@ router.put('/:id', verifyManufacturer, async (req, res) => {
         });
 
         if (!product) {
-            return res.status(404).json({ message: 'Ürün bulunamadı veya bu ürünü düzenleme yetkiniz yok' });
+            return res.status(404).json({
+                success: false,
+                message: 'Ürün bulunamadı veya bu ürünü düzenleme yetkiniz yok'
+            });
         }
 
-        Object.assign(product, req.body);
+        // Mevcut alanları güncelle
+        product.title = req.body.title || product.title;
+        product.description = req.body.description || product.description;
+        product.price = req.body.price || product.price;
+        product.category = req.body.category || product.category;
+        if (req.body.modelFormats) {
+            product.modelFormats = JSON.parse(req.body.modelFormats);
+        }
+
+        // Eğer yeni bir resim yüklendiyse
+        if (req.file) {
+            // Eski resmi sil
+            if (product.image) {
+                const oldImagePath = path.join(__dirname, '..', product.image);
+                if (fs.existsSync(oldImagePath)) {
+                    fs.unlinkSync(oldImagePath);
+                }
+            }
+            product.image = `/uploads/${req.file.filename}`;
+        }
+
         await product.save();
-        res.json(product);
+        res.json({
+            success: true,
+            product
+        });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
@@ -160,26 +264,54 @@ router.delete('/:id', verifyManufacturer, async (req, res) => {
         });
 
         if (!product) {
-            return res.status(404).json({ message: 'Ürün bulunamadı veya bu ürünü silme yetkiniz yok' });
+            return res.status(404).json({
+                success: false,
+                message: 'Ürün bulunamadı veya bu ürünü silme yetkiniz yok'
+            });
+        }
+
+        // Ürün resmini sil
+        if (product.image) {
+            const imagePath = path.join(__dirname, '..', product.image);
+            if (fs.existsSync(imagePath)) {
+                fs.unlinkSync(imagePath);
+            }
         }
 
         await product.remove();
-        res.json({ message: 'Ürün başarıyla silindi' });
+        res.json({
+            success: true,
+            message: 'Ürün başarıyla silindi'
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
 // Tekil ürün getirme
 router.get('/:id', async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
+        const product = await Product.findById(req.params.id)
+            .populate('manufacturer', 'companyName');
+            
         if (!product) {
-            return res.status(404).json({ message: 'Ürün bulunamadı' });
+            return res.status(404).json({
+                success: false,
+                message: 'Ürün bulunamadı'
+            });
         }
-        res.json(product);
+        res.json({
+            success: true,
+            product
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
