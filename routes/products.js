@@ -18,7 +18,7 @@ const storage = multer.diskStorage({
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+        cb(null, 'product-' + uniqueSuffix + path.extname(file.originalname));
     }
 });
 
@@ -36,7 +36,7 @@ const upload = multer({
     limits: {
         fileSize: 5 * 1024 * 1024 // 5MB limit
     }
-});
+}).single('image');
 
 // Tüm ürünleri getir (public)
 router.get('/', async (req, res) => {
@@ -173,86 +173,113 @@ router.get('/filter', async (req, res) => {
 });
 
 // Yeni ürün ekle (sadece manufacturer)
-router.post('/', verifyManufacturer, upload.single('image'), async (req, res) => {
-    try {
-        if (!req.file) {
+router.post('/', verifyManufacturer, (req, res) => {
+    upload(req, res, async function(err) {
+        if (err instanceof multer.MulterError) {
             return res.status(400).json({
                 success: false,
-                message: 'Ürün görseli gereklidir'
+                message: 'Dosya yükleme hatası',
+                error: err.message
+            });
+        } else if (err) {
+            return res.status(400).json({
+                success: false,
+                message: err.message
             });
         }
 
-        const product = new Product({
-            title: req.body.title,
-            description: req.body.description,
-            price: req.body.price,
-            category: req.body.category,
-            modelFormats: JSON.parse(req.body.modelFormats),
-            manufacturer: req.user.id,
-            image: `/uploads/${req.file.filename}`
-        });
+        try {
+            console.log('Gelen veriler:', req.body);
+            console.log('Gelen dosya:', req.file);
 
-        const newProduct = await product.save();
-        res.status(201).json({
-            success: true,
-            product: newProduct
-        });
-    } catch (error) {
-        console.error('Product creation error:', error);
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+            if (!req.file) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Ürün görseli gereklidir'
+                });
+            }
+
+            const product = new Product({
+                title: req.body.title,
+                description: req.body.description,
+                price: req.body.price,
+                category: req.body.category,
+                modelFormats: JSON.parse(req.body.modelFormats || '["3D"]'),
+                manufacturer: req.user.id,
+                image: `/uploads/${req.file.filename}`
+            });
+
+            const newProduct = await product.save();
+            res.status(201).json({
+                success: true,
+                product: newProduct
+            });
+        } catch (error) {
+            console.error('Product creation error:', error);
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
 });
 
 // Ürün güncelle (sadece kendi ürünlerini)
-router.put('/:id', verifyManufacturer, upload.single('image'), async (req, res) => {
-    try {
-        const product = await Product.findOne({ 
-            _id: req.params.id,
-            manufacturer: req.user.id 
-        });
-
-        if (!product) {
-            return res.status(404).json({
+router.put('/:id', verifyManufacturer, (req, res) => {
+    upload(req, res, async function(err) {
+        if (err) {
+            return res.status(400).json({
                 success: false,
-                message: 'Ürün bulunamadı veya bu ürünü düzenleme yetkiniz yok'
+                message: err.message
             });
         }
 
-        // Mevcut alanları güncelle
-        product.title = req.body.title || product.title;
-        product.description = req.body.description || product.description;
-        product.price = req.body.price || product.price;
-        product.category = req.body.category || product.category;
-        if (req.body.modelFormats) {
-            product.modelFormats = JSON.parse(req.body.modelFormats);
-        }
+        try {
+            const product = await Product.findOne({ 
+                _id: req.params.id,
+                manufacturer: req.user.id 
+            });
 
-        // Eğer yeni bir resim yüklendiyse
-        if (req.file) {
-            // Eski resmi sil
-            if (product.image) {
-                const oldImagePath = path.join(__dirname, '..', product.image);
-                if (fs.existsSync(oldImagePath)) {
-                    fs.unlinkSync(oldImagePath);
-                }
+            if (!product) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Ürün bulunamadı veya bu ürünü düzenleme yetkiniz yok'
+                });
             }
-            product.image = `/uploads/${req.file.filename}`;
-        }
 
-        await product.save();
-        res.json({
-            success: true,
-            product
-        });
-    } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
+            // Mevcut alanları güncelle
+            product.title = req.body.title || product.title;
+            product.description = req.body.description || product.description;
+            product.price = req.body.price || product.price;
+            product.category = req.body.category || product.category;
+            if (req.body.modelFormats) {
+                product.modelFormats = JSON.parse(req.body.modelFormats);
+            }
+
+            // Eğer yeni bir resim yüklendiyse
+            if (req.file) {
+                // Eski resmi sil
+                if (product.image) {
+                    const oldImagePath = path.join(__dirname, '..', product.image);
+                    if (fs.existsSync(oldImagePath)) {
+                        fs.unlinkSync(oldImagePath);
+                    }
+                }
+                product.image = `/uploads/${req.file.filename}`;
+            }
+
+            await product.save();
+            res.json({
+                success: true,
+                product
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
 });
 
 // Ürün sil (sadece kendi ürünlerini)
