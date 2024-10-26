@@ -43,16 +43,20 @@ router.post('/manufacturer/register', async (req, res) => {
     try {
         const { email, password, companyName, taxNumber, address, phone } = req.body;
 
-        // Email kontrolü
         const existingManufacturer = await Manufacturer.findOne({ email });
         if (existingManufacturer) {
-            return res.status(400).json({ message: 'Bu email adresi zaten kullanımda' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Bu email adresi zaten kullanımda' 
+            });
         }
 
-        // Vergi numarası kontrolü
         const existingTaxNumber = await Manufacturer.findOne({ taxNumber });
         if (existingTaxNumber) {
-            return res.status(400).json({ message: 'Bu vergi numarası zaten kayıtlı' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Bu vergi numarası zaten kayıtlı' 
+            });
         }
 
         const manufacturer = new Manufacturer({
@@ -67,12 +71,17 @@ router.post('/manufacturer/register', async (req, res) => {
         await manufacturer.save();
 
         const token = jwt.sign(
-            { _id: manufacturer._id.toString() },
+            { 
+                _id: manufacturer._id.toString(),
+                userType: 'manufacturer'
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.status(201).json({
+            success: true,
+            userType: 'manufacturer',
             manufacturer: {
                 id: manufacturer._id,
                 email: manufacturer.email,
@@ -81,7 +90,10 @@ router.post('/manufacturer/register', async (req, res) => {
             token
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
@@ -92,21 +104,32 @@ router.post('/manufacturer/login', async (req, res) => {
         
         const manufacturer = await Manufacturer.findOne({ email });
         if (!manufacturer) {
-            return res.status(401).json({ message: 'Böyle bir üretici hesabı bulunamadı' });
+            return res.status(401).json({ 
+                success: false,
+                message: 'Böyle bir üretici hesabı bulunamadı' 
+            });
         }
 
         const isMatch = await manufacturer.comparePassword(password);
         if (!isMatch) {
-            return res.status(401).json({ message: 'Hatalı şifre' });
+            return res.status(401).json({ 
+                success: false,
+                message: 'Hatalı şifre' 
+            });
         }
 
         const token = jwt.sign(
-            { _id: manufacturer._id.toString() },
+            { 
+                _id: manufacturer._id.toString(),
+                userType: 'manufacturer'
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.json({
+            success: true,
+            userType: 'manufacturer',
             manufacturer: {
                 id: manufacturer._id,
                 email: manufacturer.email,
@@ -115,7 +138,10 @@ router.post('/manufacturer/login', async (req, res) => {
             token
         });
     } catch (error) {
-        res.status(500).json({ message: 'Sunucu hatası' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Sunucu hatası' 
+        });
     }
 });
 
@@ -127,12 +153,18 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
         const { email, password, fullName, profession, specialization, experience, phone } = req.body;
 
         if (!req.file) {
-            return res.status(400).json({ message: 'Diploma veya yeterlilik belgesi zorunludur' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Diploma veya yeterlilik belgesi zorunludur' 
+            });
         }
 
         const existingProfessional = await Professional.findOne({ email });
         if (existingProfessional) {
-            return res.status(400).json({ message: 'Bu email adresi zaten kullanımda' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Bu email adresi zaten kullanımda' 
+            });
         }
 
         const professional = new Professional({
@@ -149,12 +181,17 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
         await professional.save();
 
         const token = jwt.sign(
-            { _id: professional._id.toString() },
+            { 
+                _id: professional._id.toString(),
+                userType: 'professional'
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.status(201).json({
+            success: true,
+            userType: 'professional',
             professional: {
                 id: professional._id,
                 email: professional.email,
@@ -163,7 +200,10 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
             token
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
@@ -174,21 +214,32 @@ router.post('/professional/login', async (req, res) => {
         
         const professional = await Professional.findOne({ email });
         if (!professional) {
-            return res.status(401).json({ message: 'Böyle bir profesyonel hesabı bulunamadı' });
+            return res.status(401).json({ 
+                success: false,
+                message: 'Böyle bir profesyonel hesabı bulunamadı' 
+            });
         }
 
         const isMatch = await professional.comparePassword(password);
         if (!isMatch) {
-            return res.status(401).json({ message: 'Hatalı şifre' });
+            return res.status(401).json({ 
+                success: false,
+                message: 'Hatalı şifre' 
+            });
         }
 
         const token = jwt.sign(
-            { _id: professional._id.toString() },
+            { 
+                _id: professional._id.toString(),
+                userType: 'professional'
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.json({
+            success: true,
+            userType: 'professional',
             professional: {
                 id: professional._id,
                 email: professional.email,
@@ -197,7 +248,10 @@ router.post('/professional/login', async (req, res) => {
             token
         });
     } catch (error) {
-        res.status(500).json({ message: 'Sunucu hatası' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Sunucu hatası' 
+        });
     }
 });
 
@@ -206,9 +260,15 @@ router.post('/manufacturer/logout', verifyManufacturer, async (req, res) => {
     try {
         req.manufacturer.tokens = req.manufacturer.tokens.filter(token => token.token !== req.token);
         await req.manufacturer.save();
-        res.json({ message: 'Başarıyla çıkış yapıldı' });
+        res.json({ 
+            success: true,
+            message: 'Başarıyla çıkış yapıldı' 
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Sunucu hatası' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Sunucu hatası' 
+        });
     }
 });
 
@@ -216,9 +276,15 @@ router.post('/professional/logout', verifyProfessional, async (req, res) => {
     try {
         req.professional.tokens = req.professional.tokens.filter(token => token.token !== req.token);
         await req.professional.save();
-        res.json({ message: 'Başarıyla çıkış yapıldı' });
+        res.json({ 
+            success: true,
+            message: 'Başarıyla çıkış yapıldı' 
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Sunucu hatası' });
+        res.status(500).json({ 
+            success: false,
+            message: 'Sunucu hatası' 
+        });
     }
 });
 
