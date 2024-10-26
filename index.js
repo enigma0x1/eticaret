@@ -5,11 +5,10 @@ const cors = require('cors');
 const authRoute = require('./routes/auth');
 const productsRoute = require('./routes/products');
 const cartRoute = require('./routes/cart');
-const verifyToken = require('./middleware/auth');
+const manufacturerRoute = require('./routes/manufacturer'); // Yeni eklendi
+const { verifyToken, verifyManufacturer, verifyProfessional } = require('./middleware/auth');
 const path = require('path');
-
-// Yeni importlar
-const { verifyManufacturer, verifyProfessional } = require('./middleware/auth');
+const multer = require('multer'); // Multer için eklendi
 
 dotenv.config();
 const app = express();
@@ -19,11 +18,16 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Upload klasörünü oluştur (eğer yoksa)
+// Upload klasörlerini oluştur (eğer yoksa)
 const fs = require('fs');
 const uploadDir = path.join(__dirname, 'uploads');
+const productUploadDir = path.join(__dirname, 'uploads/products');
+
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
+}
+if (!fs.existsSync(productUploadDir)) {
+    fs.mkdirSync(productUploadDir);
 }
 
 // MongoDB Connection
@@ -35,6 +39,7 @@ mongoose.connect(process.env.MONGO_URL)
 app.use('/api/auth', authRoute);
 app.use('/api/products', productsRoute);
 app.use('/api/cart', cartRoute);
+app.use('/api/manufacturer', manufacturerRoute); // Yeni eklendi
 
 // Test Routes
 app.get('/test', (req, res) => {
