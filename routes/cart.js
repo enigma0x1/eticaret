@@ -1,16 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const Cart = require('../models/Cart');
-const verifyToken = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
 // Sepeti getir
-router.get('/', verifyToken, async (req, res) => {
+router.get('/', auth, async (req, res) => {
     try {
-        let cart = await Cart.findOne({ userId: req.user.userId })
-            .populate('items.productId');
+        let cart = await Cart.findOne({ 
+            userId: req.user._id,
+            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        }).populate('items.productId');
         
         if (!cart) {
-            cart = new Cart({ userId: req.user.userId, items: [], total: 0 });
+            cart = new Cart({
+                userId: req.user._id,
+                userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional',
+                items: [],
+                total: 0
+            });
             await cart.save();
         }
         
@@ -21,13 +28,21 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 // Sepete ürün ekle
-router.post('/add', verifyToken, async (req, res) => {
+router.post('/add', auth, async (req, res) => {
     try {
         const { productId, quantity } = req.body;
-        let cart = await Cart.findOne({ userId: req.user.userId });
+        let cart = await Cart.findOne({ 
+            userId: req.user._id,
+            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        });
         
         if (!cart) {
-            cart = new Cart({ userId: req.user.userId, items: [], total: 0 });
+            cart = new Cart({
+                userId: req.user._id,
+                userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional',
+                items: [],
+                total: 0
+            });
         }
 
         const itemIndex = cart.items.findIndex(item => item.productId.toString() === productId);
@@ -46,9 +61,13 @@ router.post('/add', verifyToken, async (req, res) => {
 });
 
 // Sepetten ürün çıkar
-router.delete('/remove/:productId', verifyToken, async (req, res) => {
+router.delete('/remove/:productId', auth, async (req, res) => {
     try {
-        const cart = await Cart.findOne({ userId: req.user.userId });
+        const cart = await Cart.findOne({ 
+            userId: req.user._id,
+            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        });
+        
         if (!cart) return res.status(404).json({ message: 'Sepet bulunamadı' });
 
         cart.items = cart.items.filter(item => item.productId.toString() !== req.params.productId);
