@@ -316,5 +316,23 @@ router.delete('/documents', verifyManufacturer, async (req, res) => {
         });
     }
 });
-
+// Çıkış yap
+router.post('/logout', verifyManufacturer, async (req, res) => {
+    try {
+        // Mevcut token'ı tokens dizisinden çıkar
+        req.manufacturer.tokens = req.manufacturer.tokens.filter(token => token.token !== req.token);
+        await req.manufacturer.save();
+        
+        res.json({
+            success: true,
+            message: 'Başarıyla çıkış yapıldı'
+        });
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
+    }
+});
 module.exports = router;
