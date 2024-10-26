@@ -1,16 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
-const User = require('../models/User');
-const verifyToken = require('../middleware/auth');
+const Manufacturer = require('../models/Manufacturer');
+const Professional = require('../models/Professional');
+const { verifyManufacturer, verifyProfessional } = require('../middleware/auth');
 
 // Multer konfigürasyonu
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        // Mutlak yol kullanıyoruz
         cb(null, path.join(__dirname, '../uploads/'));
     },
     filename: function (req, file, cb) {
@@ -36,121 +36,189 @@ const upload = multer({
     }
 });
 
-// REGISTER (SIGNUP)
-router.post('/register', upload.single('diploma'), async (req, res) => {
+// ÜRETİCİ ROUTES
+
+// Üretici Kaydı
+router.post('/manufacturer/register', async (req, res) => {
     try {
-        const { name, email, password, userType, profession } = req.body;
+        const { email, password, companyName, taxNumber, address, phone } = req.body;
 
         // Email kontrolü
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
+        const existingManufacturer = await Manufacturer.findOne({ email });
+        if (existingManufacturer) {
             return res.status(400).json({ message: 'Bu email adresi zaten kullanımda' });
         }
 
-        // Dosya kontrolü (eğer professional ise zorunlu)
-        if (userType === 'professional' && !req.file) {
-            return res.status(400).json({ message: 'Diploma veya yeterlilik belgesi zorunludur' });
+        // Vergi numarası kontrolü
+        const existingTaxNumber = await Manufacturer.findOne({ taxNumber });
+        if (existingTaxNumber) {
+            return res.status(400).json({ message: 'Bu vergi numarası zaten kayıtlı' });
         }
 
-        // Şifreyi hash'le
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Yeni kullanıcı oluştur
-        const user = new User({
-            name,
+        const manufacturer = new Manufacturer({
             email,
-            password: hashedPassword,
-            userType,
-            profession: userType === 'professional' ? profession : undefined,
-            diplomaUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
-            verified: false
+            password,
+            companyName,
+            taxNumber,
+            address,
+            phone
         });
 
-        await user.save();
+        await manufacturer.save();
 
-        // Token oluştur
         const token = jwt.sign(
-            { userId: user._id, userType: user.userType },
+            { _id: manufacturer._id.toString() },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.status(201).json({
-            message: 'Kullanıcı başarıyla oluşturuldu',
-            token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                userType: user.userType,
-                profession: user.profession,
-                diplomaUrl: user.diplomaUrl
-            }
+            manufacturer: {
+                id: manufacturer._id,
+                email: manufacturer.email,
+                companyName: manufacturer.companyName
+            },
+            token
         });
-
     } catch (error) {
-        if (error instanceof multer.MulterError) {
-            if (error.code === 'LIMIT_FILE_SIZE') {
-                return res.status(400).json({ message: 'Dosya boyutu 5MB\'dan büyük olamaz' });
-            }
-            return res.status(400).json({ message: 'Dosya yükleme hatası' });
-        }
         res.status(500).json({ message: error.message });
     }
 });
 
-// LOGIN
-router.post('/login', async (req, res) => {
+// Üretici Girişi
+router.post('/manufacturer/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        // Kullanıcıyı bul
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(400).json({ message: 'Kullanıcı bulunamadı' });
+        
+        const manufacturer = await Manufacturer.findOne({ email });
+        if (!manufacturer) {
+            return res.status(401).json({ message: 'Böyle bir üretici hesabı bulunamadı' });
         }
 
-        // Şifreyi kontrol et
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        if (!isValidPassword) {
-            return res.status(400).json({ message: 'Geçersiz şifre' });
+        const isMatch = await manufacturer.comparePassword(password);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Hatalı şifre' });
         }
 
-        // Token oluştur
         const token = jwt.sign(
-            { userId: user._id, userType: user.userType },
+            { _id: manufacturer._id.toString() },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
         res.json({
-            message: 'Giriş başarılı',
-            token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                userType: user.userType,
-                profession: user.profession,
-                diplomaUrl: user.diplomaUrl
-            }
+            manufacturer: {
+                id: manufacturer._id,
+                email: manufacturer.email,
+                companyName: manufacturer.companyName
+            },
+            token
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Sunucu hatası' });
+    }
+});
+
+// PROFESYONEL ROUTES
+
+// Profesyonel Kaydı
+router.post('/professional/register', upload.single('diploma'), async (req, res) => {
+    try {
+        const { email, password, fullName, profession, specialization, experience, phone } = req.body;
+
+        if (!req.file) {
+            return res.status(400).json({ message: 'Diploma veya yeterlilik belgesi zorunludur' });
+        }
+
+        const existingProfessional = await Professional.findOne({ email });
+        if (existingProfessional) {
+            return res.status(400).json({ message: 'Bu email adresi zaten kullanımda' });
+        }
+
+        const professional = new Professional({
+            email,
+            password,
+            fullName,
+            profession,
+            specialization,
+            experience,
+            phone,
+            portfolio: req.file.path
         });
 
+        await professional.save();
+
+        const token = jwt.sign(
+            { _id: professional._id.toString() },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.status(201).json({
+            professional: {
+                id: professional._id,
+                email: professional.email,
+                fullName: professional.fullName
+            },
+            token
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 });
 
-// Kullanıcı bilgilerini getir
-router.get('/me', verifyToken, async (req, res) => {
+// Profesyonel Girişi
+router.post('/professional/login', async (req, res) => {
     try {
-        const user = await User.findById(req.user.userId).select('-password');
-        if (!user) {
-            return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
+        const { email, password } = req.body;
+        
+        const professional = await Professional.findOne({ email });
+        if (!professional) {
+            return res.status(401).json({ message: 'Böyle bir profesyonel hesabı bulunamadı' });
         }
-        res.json(user);
+
+        const isMatch = await professional.comparePassword(password);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Hatalı şifre' });
+        }
+
+        const token = jwt.sign(
+            { _id: professional._id.toString() },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            professional: {
+                id: professional._id,
+                email: professional.email,
+                fullName: professional.fullName
+            },
+            token
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: 'Sunucu hatası' });
+    }
+});
+
+// Çıkış Routes
+router.post('/manufacturer/logout', verifyManufacturer, async (req, res) => {
+    try {
+        req.manufacturer.tokens = req.manufacturer.tokens.filter(token => token.token !== req.token);
+        await req.manufacturer.save();
+        res.json({ message: 'Başarıyla çıkış yapıldı' });
+    } catch (error) {
+        res.status(500).json({ message: 'Sunucu hatası' });
+    }
+});
+
+router.post('/professional/logout', verifyProfessional, async (req, res) => {
+    try {
+        req.professional.tokens = req.professional.tokens.filter(token => token.token !== req.token);
+        await req.professional.save();
+        res.json({ message: 'Başarıyla çıkış yapıldı' });
+    } catch (error) {
+        res.status(500).json({ message: 'Sunucu hatası' });
     }
 });
 
