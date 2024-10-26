@@ -2,13 +2,17 @@ const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const path = require('path');
+const multer = require('multer');
+const rateLimit = require('express-rate-limit');
+const fs = require('fs');
+
+// Route imports
 const authRoute = require('./routes/auth');
 const productsRoute = require('./routes/products');
 const cartRoute = require('./routes/cart');
 const manufacturerRoute = require('./routes/manufacturer');
 const { auth, verifyManufacturer, verifyProfessional } = require('./middleware/auth');
-const path = require('path');
-const multer = require('multer');
 
 dotenv.config();
 const app = express();
@@ -19,19 +23,18 @@ const corsOptions = {
         'http://localhost:3000',
         'http://localhost:5000',
         'https://enigma0x1.github.io',
-        // Diğer izin verilen originler
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     credentials: true,
-    maxAge: 86400 // 24 saat
+    maxAge: 86400
 };
 
-// CORS Middleware
+// Middleware Setup
 app.use(cors(corsOptions));
-
-// CORS Pre-flight requests için
 app.options('*', cors(corsOptions));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Security Headers
 app.use((req, res, next) => {
@@ -42,28 +45,28 @@ app.use((req, res, next) => {
     next();
 });
 
-// Basic Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Upload klasörlerini oluştur (eğer yoksa)
-const fs = require('fs');
+// Upload Directories Setup
 const uploadDir = path.join(__dirname, 'uploads');
 const productUploadDir = path.join(__dirname, 'uploads/products');
 
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
-}
-if (!fs.existsSync(productUploadDir)) {
-    fs.mkdirSync(productUploadDir);
-}
+[uploadDir, productUploadDir].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
+
+// Static File Serving
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Rate Limiting
-const rateLimit = require('express-rate-limit');
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 dakika
-    max: 100 // IP başına limit
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: {
+        status: 'error',
+        message: 'Çok fazla istek yapıldı, lütfen daha sonra tekrar deneyin.',
+        code: 'RATE_LIMIT_EXCEEDED'
+    }
 });
 app.use(limiter);
 
@@ -74,59 +77,64 @@ mongoose.connect(process.env.MONGO_URL, {
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
 })
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.log('MongoDB connection error:', err));
+.then(() => console.log('MongoDB connected successfully'))
+.catch(err => console.error('MongoDB connection error:', err));
 
-// Health Check Endpoint
+// Health Check
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', timestamp: new Date() });
+    res.status(200).json({ 
+        status: 'success',
+        message: 'Server is healthy',
+        timestamp: new Date(),
+        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    });
 });
 
-// Routes
+// API Routes
 app.use('/api/auth', authRoute);
 app.use('/api/products', productsRoute);
 app.use('/api/cart', cartRoute);
 app.use('/api/manufacturer', manufacturerRoute);
 
-// Test Routes
-app.get('/test', (req, res) => {
-    res.send('Test route is working!');
-});
-
-// Korumalı test rotaları
+// Protected Test Routes
 app.get('/protected', auth, (req, res) => {
-    res.json({ message: "Protected route accessed successfully", user: req.user });
+    res.json({ 
+        status: 'success',
+        message: "Protected route accessed successfully", 
+        user: req.user 
+    });
 });
 
 app.get('/manufacturer-only', verifyManufacturer, (req, res) => {
-    res.json({ message: "Manufacturer route accessed successfully", manufacturer: req.manufacturer });
+    res.json({ 
+        status: 'success',
+        message: "Manufacturer route accessed successfully", 
+        manufacturer: req.manufacturer 
+    });
 });
 
 app.get('/professional-only', verifyProfessional, (req, res) => {
-    res.json({ message: "Professional route accessed successfully", professional: req.professional });
+    res.json({ 
+        status: 'success',
+        message: "Professional route accessed successfully", 
+        professional: req.professional 
+    });
 });
 
-// Global Error Handler
+// Error Handlers
 app.use((err, req, res, next) => {
-    console.error('Error:', err.stack);
-    
-    // Multer hata kontrolü
+    console.error('Error:', err);
+
+    // Multer Error Handler
     if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ 
-                status: 'error',
-                message: 'Dosya boyutu çok büyük',
-                code: 'FILE_TOO_LARGE'
-            });
-        }
         return res.status(400).json({ 
             status: 'error',
-            message: 'Dosya yükleme hatası',
-            code: 'FILE_UPLOAD_ERROR'
+            message: err.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu çok büyük' : 'Dosya yükleme hatası',
+            code: err.code === 'LIMIT_FILE_SIZE' ? 'FILE_TOO_LARGE' : 'FILE_UPLOAD_ERROR'
         });
     }
-    
-    // MongoDB hataları
+
+    // MongoDB Error Handler
     if (err.name === 'MongoError' || err.name === 'MongoServerError') {
         return res.status(503).json({
             status: 'error',
@@ -135,7 +143,7 @@ app.use((err, req, res, next) => {
         });
     }
 
-    // Validation hataları
+    // Validation Error Handler
     if (err.name === 'ValidationError') {
         return res.status(400).json({
             status: 'error',
@@ -145,41 +153,57 @@ app.use((err, req, res, next) => {
         });
     }
 
-    // Genel hata
+    // JWT Error Handler
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+        return res.status(401).json({
+            status: 'error',
+            message: 'Geçersiz veya süresi dolmuş token',
+            code: 'INVALID_TOKEN'
+        });
+    }
+
+    // Default Error Handler
     res.status(err.status || 500).json({
         status: 'error',
         message: err.message || 'Bir şeyler yanlış gitti!',
-        code: err.code || 'INTERNAL_SERVER_ERROR'
+        code: err.code || 'INTERNAL_SERVER_ERROR',
+        ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     });
 });
 
-// 404 handler
+// 404 Handler
 app.use((req, res) => {
     res.status(404).json({ 
         status: 'error',
         message: 'Sayfa bulunamadı!',
-        code: 'NOT_FOUND'
+        code: 'NOT_FOUND',
+        path: req.originalUrl
     });
 });
 
 // Graceful Shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM signal received: closing HTTP server');
-    app.close(() => {
+const gracefulShutdown = () => {
+    console.log('Graceful shutdown initiated...');
+    server.close(() => {
         console.log('HTTP server closed');
         mongoose.connection.close(false, () => {
             console.log('MongoDB connection closed');
             process.exit(0);
         });
     });
-});
+};
 
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+// Server Setup
 const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
 });
 
-// Timeout ayarı
-server.timeout = 60000; // 60 saniye
+// Server Timeout
+server.timeout = 60000; // 60 seconds
 
 module.exports = app;
