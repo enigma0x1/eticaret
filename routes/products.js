@@ -17,7 +17,15 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Tüm ürünleri getir
+// Manufacturer kontrolü middleware
+const isManufacturer = async (req, res, next) => {
+    if (req.user.userType !== 'manufacturer') {
+        return res.status(403).json({ message: 'Bu işlem için üretici yetkisi gerekli' });
+    }
+    next();
+};
+
+// Tüm ürünleri getir (public)
 router.get('/', async (req, res) => {
     try {
         const products = await Product.find();
@@ -27,18 +35,13 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Yeni ürün ekle
-router.post('/', verifyToken, upload.single('image'), async (req, res) => {
-    const product = new Product({
-        ...req.body,
-        image: req.file.filename
-    });
-
+// Manufacturer'ın kendi ürünlerini getir
+router.get('/my-products', verifyToken, isManufacturer, async (req, res) => {
     try {
-        const newProduct = await product.save();
-        res.status(201).json(newProduct);
+        const products = await Product.find({ manufacturer: req.user.id });
+        res.json(products);
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(500).json({ message: error.message });
     }
 });
 
@@ -76,29 +79,25 @@ router.get('/filter', async (req, res) => {
             minPrice, 
             maxPrice, 
             modelFormat,
-            sort // price_asc, price_desc, rating, newest
+            sort
         } = req.query;
 
         let query = {};
         
-        // Kategori filtresi
         if (category && category !== 'Tüm Kategoriler') {
             query.category = category;
         }
 
-        // Fiyat aralığı filtresi
         if (minPrice || maxPrice) {
             query.price = {};
             if (minPrice) query.price.$gte = Number(minPrice);
             if (maxPrice) query.price.$lte = Number(maxPrice);
         }
 
-        // Model format filtresi
         if (modelFormat && modelFormat !== 'Tüm Formatlar') {
             query.modelFormats = modelFormat;
         }
 
-        // Sıralama
         let sortQuery = {};
         switch(sort) {
             case 'price_asc':
@@ -119,6 +118,61 @@ router.get('/filter', async (req, res) => {
 
         const products = await Product.find(query).sort(sortQuery);
         res.json(products);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Yeni ürün ekle (sadece manufacturer)
+router.post('/', verifyToken, isManufacturer, upload.single('image'), async (req, res) => {
+    const product = new Product({
+        ...req.body,
+        manufacturer: req.user.id,
+        image: req.file.filename
+    });
+
+    try {
+        const newProduct = await product.save();
+        res.status(201).json(newProduct);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Ürün güncelle (sadece kendi ürünlerini)
+router.put('/:id', verifyToken, isManufacturer, async (req, res) => {
+    try {
+        const product = await Product.findOne({ 
+            _id: req.params.id,
+            manufacturer: req.user.id 
+        });
+
+        if (!product) {
+            return res.status(404).json({ message: 'Ürün bulunamadı veya bu ürünü düzenleme yetkiniz yok' });
+        }
+
+        Object.assign(product, req.body);
+        await product.save();
+        res.json(product);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Ürün sil (sadece kendi ürünlerini)
+router.delete('/:id', verifyToken, isManufacturer, async (req, res) => {
+    try {
+        const product = await Product.findOne({ 
+            _id: req.params.id,
+            manufacturer: req.user.id 
+        });
+
+        if (!product) {
+            return res.status(404).json({ message: 'Ürün bulunamadı veya bu ürünü silme yetkiniz yok' });
+        }
+
+        await product.remove();
+        res.json({ message: 'Ürün başarıyla silindi' });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
