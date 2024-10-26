@@ -1,4 +1,3 @@
-// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -19,7 +18,6 @@ const storage = multer.diskStorage({
             uploadDir = path.join(__dirname, '../uploads/diplomas');
         }
 
-        // Klasörü oluştur (yoksa)
         if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
         }
@@ -31,17 +29,19 @@ const storage = multer.diskStorage({
     }
 });
 
+const fileFilter = (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (allowedTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Geçersiz dosya tipi. Sadece JPEG, PNG, WEBP ve PDF formatları kabul edilir.'));
+    }
+};
+
 const upload = multer({
     storage: storage,
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-        if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Geçersiz dosya tipi. Sadece JPEG, PNG, WEBP ve PDF formatları kabul edilir.'));
-        }
-    }
+    fileFilter: fileFilter
 });
 
 // Üretici Login
@@ -49,7 +49,7 @@ router.post('/manufacturer/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const manufacturer = await Manufacturer.findOne({ email });
+        const manufacturer = await Manufacturer.findOne({ email: email.toLowerCase() });
         if (!manufacturer) {
             return res.status(400).json({
                 success: false,
@@ -73,6 +73,12 @@ router.post('/manufacturer/login', async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
+
+        // Token'ı üreticiye ekle
+        manufacturer.tokens = manufacturer.tokens || [];
+        manufacturer.tokens.push({ token });
+        manufacturer.lastLogin = new Date();
+        await manufacturer.save();
 
         res.json({
             success: true,
@@ -98,7 +104,7 @@ router.post('/professional/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const professional = await Professional.findOne({ email });
+        const professional = await Professional.findOne({ email: email.toLowerCase() });
         if (!professional) {
             return res.status(400).json({
                 success: false,
@@ -122,6 +128,12 @@ router.post('/professional/login', async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
+
+        // Token'ı profesyonele ekle
+        professional.tokens = professional.tokens || [];
+        professional.tokens.push({ token });
+        professional.lastLogin = new Date();
+        await professional.save();
 
         res.json({
             success: true,
@@ -147,11 +159,19 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
     try {
         const { companyName, email, password, address, phone, businessArea, taxNumber, contactName } = req.body;
 
-        const existingManufacturer = await Manufacturer.findOne({ email });
+        const existingManufacturer = await Manufacturer.findOne({ 
+            $or: [
+                { email: email.toLowerCase() },
+                { taxNumber }
+            ]
+        });
+
         if (existingManufacturer) {
             return res.status(400).json({ 
                 success: false,
-                message: 'Bu email adresi zaten kullanımda' 
+                message: existingManufacturer.email === email.toLowerCase() ? 
+                    'Bu email adresi zaten kullanımda' : 
+                    'Bu vergi numarası zaten kullanımda'
             });
         }
 
@@ -166,17 +186,16 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
 
         const manufacturer = new Manufacturer({
             companyName,
-            email,
+            email: email.toLowerCase(),
             password,
             address,
             phone,
             businessArea,
             taxNumber,
             contactName,
-            documents: documentPaths
+            documents: documentPaths,
+            isActive: true
         });
-
-        await manufacturer.save();
 
         const token = jwt.sign(
             { 
@@ -186,6 +205,9 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
+
+        manufacturer.tokens = [{ token }];
+        await manufacturer.save();
 
         res.status(201).json({
             success: true,
@@ -219,7 +241,7 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
     try {
         const { fullName, email, password, profession } = req.body;
 
-        const existingProfessional = await Professional.findOne({ email });
+        const existingProfessional = await Professional.findOne({ email: email.toLowerCase() });
         if (existingProfessional) {
             return res.status(400).json({ 
                 success: false,
@@ -238,13 +260,12 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
 
         const professional = new Professional({
             fullName,
-            email,
+            email: email.toLowerCase(),
             password,
             profession,
-            diploma: diplomaPath
+            diploma: diplomaPath,
+            isActive: true
         });
-
-        await professional.save();
 
         const token = jwt.sign(
             { 
@@ -254,6 +275,9 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
+
+        professional.tokens = [{ token }];
+        await professional.save();
 
         res.status(201).json({
             success: true,
@@ -276,6 +300,58 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
             success: false,
             message: 'Sunucu hatası',
             error: error.message
+        });
+    }
+});
+
+// Token Doğrulama
+router.get('/verify-token', async (req, res) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'Token bulunamadı'
+            });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        let user;
+
+        if (decoded.userType === 'manufacturer') {
+            user = await Manufacturer.findOne({ 
+                _id: decoded._id,
+                'tokens.token': token,
+                isActive: true
+            });
+        } else if (decoded.userType === 'professional') {
+            user = await Professional.findOne({ 
+                _id: decoded._id,
+                'tokens.token': token,
+                isActive: true
+            });
+        }
+
+        if (!user) {
+            throw new Error('Geçersiz token');
+        }
+
+        res.json({
+            success: true,
+            userType: decoded.userType,
+            user: {
+                id: user._id,
+                email: user.email,
+                ...(decoded.userType === 'manufacturer' ? 
+                    { companyName: user.companyName } : 
+                    { fullName: user.fullName })
+            }
+        });
+    } catch (error) {
+        res.status(401).json({
+            success: false,
+            message: 'Geçersiz token'
         });
     }
 });
