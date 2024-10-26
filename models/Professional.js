@@ -21,42 +21,14 @@ const professionalSchema = new mongoose.Schema({
     },
     profession: {
         type: String,
-        required: true,
-        enum: ['Designer', 'Engineer', 'Architect', 'Other'] // Meslek seçenekleri
-    },
-    specialization: {
-        type: String,
         required: true
     },
-    experience: {
-        type: Number, // Yıl olarak deneyim
-        required: true
-    },
-    phone: {
+    diploma: {
         type: String,
         required: true
-    },
-    portfolio: {
-        type: String, // Portfolio URL
-        required: false
-    },
-    certifications: [{
-        name: String,
-        issuer: String,
-        year: Number
-    }],
-    skills: [{
-        type: String
-    }],
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    status: {
-        type: String,
-        enum: ['active', 'inactive', 'suspended'],
-        default: 'active'
     }
+}, {
+    timestamps: true
 });
 
 // Şifre hashleme
@@ -66,10 +38,5 @@ professionalSchema.pre('save', async function(next) {
     }
     next();
 });
-
-// Şifre karşılaştırma metodu
-professionalSchema.methods.comparePassword = async function(candidatePassword) {
-    return bcrypt.compare(candidatePassword, this.password);
-};
 
 module.exports = mongoose.model('Professional', professionalSchema);
