@@ -68,4 +68,73 @@ router.get('/category/:category', async (req, res) => {
     }
 });
 
+// Filtreli ürün getirme
+router.get('/filter', async (req, res) => {
+    try {
+        const { 
+            category, 
+            minPrice, 
+            maxPrice, 
+            modelFormat,
+            sort // price_asc, price_desc, rating, newest
+        } = req.query;
+
+        let query = {};
+        
+        // Kategori filtresi
+        if (category && category !== 'Tüm Kategoriler') {
+            query.category = category;
+        }
+
+        // Fiyat aralığı filtresi
+        if (minPrice || maxPrice) {
+            query.price = {};
+            if (minPrice) query.price.$gte = Number(minPrice);
+            if (maxPrice) query.price.$lte = Number(maxPrice);
+        }
+
+        // Model format filtresi
+        if (modelFormat && modelFormat !== 'Tüm Formatlar') {
+            query.modelFormats = modelFormat;
+        }
+
+        // Sıralama
+        let sortQuery = {};
+        switch(sort) {
+            case 'price_asc':
+                sortQuery = { price: 1 };
+                break;
+            case 'price_desc':
+                sortQuery = { price: -1 };
+                break;
+            case 'rating':
+                sortQuery = { rating: -1 };
+                break;
+            case 'newest':
+                sortQuery = { createdAt: -1 };
+                break;
+            default:
+                sortQuery = { createdAt: -1 };
+        }
+
+        const products = await Product.find(query).sort(sortQuery);
+        res.json(products);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Tekil ürün getirme
+router.get('/:id', async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ message: 'Ürün bulunamadı' });
+        }
+        res.json(product);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 module.exports = router;
