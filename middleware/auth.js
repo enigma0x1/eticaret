@@ -63,11 +63,12 @@ const verifyManufacturer = async (req, res, next) => {
         const manufacturer = await Manufacturer.findOne({ _id: decoded._id });
 
         if (!manufacturer) {
-            throw new Error();
+            throw new Error('Üretici bulunamadı');
         }
 
         req.token = token;
         req.manufacturer = manufacturer;
+        req.user = manufacturer; // Bu satırı ekledik
         next();
     } catch (error) {
         res.status(401).json({ message: 'Lütfen giriş yapın' });
@@ -96,11 +97,12 @@ const verifyProfessional = async (req, res, next) => {
         const professional = await Professional.findOne({ _id: decoded._id });
 
         if (!professional) {
-            throw new Error();
+            throw new Error('Profesyonel bulunamadı');
         }
 
         req.token = token;
         req.professional = professional;
+        req.user = professional; // Bu satırı ekledik
         next();
     } catch (error) {
         res.status(401).json({ message: 'Lütfen giriş yapın' });
