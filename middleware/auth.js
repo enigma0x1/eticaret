@@ -20,4 +20,17 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-module.exports = verifyToken;
+const verifyManufacturer = (req, res, next) => {
+    verifyToken(req, res, () => {
+        if (req.user.userType === 'manufacturer') {
+            next();
+        } else {
+            return res.status(403).json({ message: "Bu işlem için üretici yetkisi gerekli" });
+        }
+    });
+};
+
+module.exports = {
+    verifyToken,
+    verifyManufacturer
+};
