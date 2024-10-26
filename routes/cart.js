@@ -2,21 +2,23 @@ const express = require('express');
 const router = express.Router();
 const Cart = require('../models/Cart');
 const { auth } = require('../middleware/auth');
+const Product = require('../models/Product'); // Ürün fiyatı için gerekli
 
-// Sepeti getir
+// Aktif sepeti getir
 router.get('/', auth, async (req, res) => {
     try {
-        let cart = await Cart.findOne({ 
-            userId: req.user._id,
-            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
-        }).populate('items.productId');
+        let cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
         
         if (!cart) {
             cart = new Cart({
                 userId: req.user._id,
                 userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional',
                 items: [],
-                total: 0
+                total: 0,
+                status: 'active'
             });
             await cart.save();
         }
@@ -43,31 +45,29 @@ router.post('/add', auth, async (req, res) => {
             });
         }
 
-        let cart = await Cart.findOne({ 
-            userId: req.user._id,
-            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
-        });
+        // Ürün fiyatını al
+        const product = await Product.findById(productId);
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: 'Ürün bulunamadı'
+            });
+        }
+
+        let cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
 
         if (!cart) {
             cart = new Cart({
                 userId: req.user._id,
                 userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional',
-                items: [],
-                total: 0
+                status: 'active'
             });
         }
 
-        const itemIndex = cart.items.findIndex(item => 
-            item.productId.toString() === productId
-        );
-
-        if (itemIndex > -1) {
-            cart.items[itemIndex].quantity += quantity;
-        } else {
-            cart.items.push({ productId, quantity });
-        }
-
-        await cart.save();
+        await cart.addItem(productId, quantity, product.price);
         await cart.populate('items.productId');
 
         res.json({ success: true, cart });
@@ -83,10 +83,10 @@ router.post('/add', auth, async (req, res) => {
 // Sepetten ürün çıkar
 router.delete('/remove/:productId', auth, async (req, res) => {
     try {
-        const cart = await Cart.findOne({ 
-            userId: req.user._id,
-            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
-        });
+        const cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
 
         if (!cart) {
             return res.status(404).json({
@@ -95,11 +95,7 @@ router.delete('/remove/:productId', auth, async (req, res) => {
             });
         }
 
-        cart.items = cart.items.filter(item => 
-            item.productId.toString() !== req.params.productId
-        );
-
-        await cart.save();
+        await cart.removeItem(req.params.productId);
         await cart.populate('items.productId');
 
         res.json({ success: true, cart });
@@ -124,10 +120,10 @@ router.put('/update/:productId', auth, async (req, res) => {
             });
         }
 
-        const cart = await Cart.findOne({ 
-            userId: req.user._id,
-            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
-        });
+        const cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
 
         if (!cart) {
             return res.status(404).json({
@@ -136,30 +132,17 @@ router.put('/update/:productId', auth, async (req, res) => {
             });
         }
 
-        const itemIndex = cart.items.findIndex(item => 
-            item.productId.toString() === req.params.productId
-        );
-
-        if (itemIndex === -1) {
-            return res.status(404).json({
-                success: false,
-                message: 'Ürün sepette bulunamadı'
-            });
-        }
-
-        if (quantity === 0) {
-            cart.items = cart.items.filter(item => 
-                item.productId.toString() !== req.params.productId
-            );
-        } else {
-            cart.items[itemIndex].quantity = quantity;
-        }
-
-        await cart.save();
+        await cart.updateItemQuantity(req.params.productId, quantity);
         await cart.populate('items.productId');
 
         res.json({ success: true, cart });
     } catch (error) {
+        if (error.message === 'Ürün sepette bulunamadı') {
+            return res.status(404).json({
+                success: false,
+                message: error.message
+            });
+        }
         console.error('Update cart error:', error);
         res.status(500).json({ 
             success: false, 
@@ -171,10 +154,10 @@ router.put('/update/:productId', auth, async (req, res) => {
 // Sepeti temizle
 router.delete('/clear', auth, async (req, res) => {
     try {
-        const cart = await Cart.findOne({ 
-            userId: req.user._id,
-            userType: req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
-        });
+        const cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
 
         if (!cart) {
             return res.status(404).json({
@@ -183,9 +166,7 @@ router.delete('/clear', auth, async (req, res) => {
             });
         }
 
-        cart.items = [];
-        cart.total = 0;
-        await cart.save();
+        await cart.clear();
 
         res.json({ 
             success: true, 
@@ -197,6 +178,77 @@ router.delete('/clear', auth, async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Sepet temizlenirken hata oluştu' 
+        });
+    }
+});
+
+// Sepeti tamamla
+router.post('/complete', auth, async (req, res) => {
+    try {
+        const cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
+
+        if (!cart) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aktif sepet bulunamadı'
+            });
+        }
+
+        if (cart.items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Sepetiniz boş'
+            });
+        }
+
+        cart.status = 'completed';
+        await cart.save();
+
+        res.json({ 
+            success: true, 
+            message: 'Sepet tamamlandı',
+            cart 
+        });
+    } catch (error) {
+        console.error('Complete cart error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Sepet tamamlanırken hata oluştu' 
+        });
+    }
+});
+
+// Sepeti iptal et
+router.post('/abandon', auth, async (req, res) => {
+    try {
+        const cart = await Cart.findActiveCart(
+            req.user._id,
+            req.userType === 'manufacturer' ? 'Manufacturer' : 'Professional'
+        );
+
+        if (!cart) {
+            return res.status(404).json({
+                success: false,
+                message: 'Aktif sepet bulunamadı'
+            });
+        }
+
+        cart.status = 'abandoned';
+        await cart.save();
+
+        res.json({ 
+            success: true, 
+            message: 'Sepet iptal edildi',
+            cart 
+        });
+    } catch (error) {
+        console.error('Abandon cart error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Sepet iptal edilirken hata oluştu' 
         });
     }
 });
