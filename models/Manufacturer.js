@@ -1,4 +1,3 @@
-// models/Manufacturer.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -26,13 +25,15 @@ const manufacturerSchema = new mongoose.Schema({
     },
     address: String,
     phone: String,
+    businessArea: String,
+    contactName: String,
+    documents: [String],
     createdAt: {
         type: Date,
         default: Date.now
     }
 });
 
-// Şifre hashleme
 manufacturerSchema.pre('save', async function(next) {
     if (this.isModified('password')) {
         this.password = await bcrypt.hash(this.password, 10);
@@ -40,7 +41,6 @@ manufacturerSchema.pre('save', async function(next) {
     next();
 });
 
-// Şifre karşılaştırma metodu
 manufacturerSchema.methods.comparePassword = async function(candidatePassword) {
     return bcrypt.compare(candidatePassword, this.password);
 };
