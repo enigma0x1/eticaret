@@ -5,10 +5,10 @@ const cors = require('cors');
 const authRoute = require('./routes/auth');
 const productsRoute = require('./routes/products');
 const cartRoute = require('./routes/cart');
-const manufacturerRoute = require('./routes/manufacturer'); // Yeni eklendi
-const { verifyToken, verifyManufacturer, verifyProfessional } = require('./middleware/auth');
+const manufacturerRoute = require('./routes/manufacturer');
+const { auth, verifyManufacturer, verifyProfessional } = require('./middleware/auth');
 const path = require('path');
-const multer = require('multer'); // Multer için eklendi
+const multer = require('multer');
 
 dotenv.config();
 const app = express();
@@ -39,7 +39,7 @@ mongoose.connect(process.env.MONGO_URL)
 app.use('/api/auth', authRoute);
 app.use('/api/products', productsRoute);
 app.use('/api/cart', cartRoute);
-app.use('/api/manufacturer', manufacturerRoute); // Yeni eklendi
+app.use('/api/manufacturer', manufacturerRoute);
 
 // Test Routes
 app.get('/test', (req, res) => {
@@ -47,7 +47,7 @@ app.get('/test', (req, res) => {
 });
 
 // Korumalı test rotaları
-app.get('/protected', verifyToken, (req, res) => {
+app.get('/protected', auth, (req, res) => {
     res.json({ message: "Protected route accessed successfully", user: req.user });
 });
 
