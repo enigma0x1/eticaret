@@ -1,11 +1,8 @@
-// routes/manufacturer.js
-
 const express = require('express');
 const router = express.Router();
 const { verifyManufacturer } = require('../middleware/auth');
 const Product = require('../models/Product');
 const Manufacturer = require('../models/Manufacturer');
-const BlacklistedToken = require('../models/BlacklistedToken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -13,7 +10,13 @@ const fs = require('fs');
 // Multer konfigürasyonu
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        const uploadDir = path.join(__dirname, '../uploads/products');
+        let uploadDir;
+        if (file.fieldname === 'images') {
+            uploadDir = path.join(__dirname, '../uploads/products');
+        } else if (file.fieldname === 'documents') {
+            uploadDir = path.join(__dirname, '../uploads/documents');
+        }
+        
         if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
         }
@@ -21,21 +24,33 @@ const storage = multer.diskStorage({
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, 'product-' + uniqueSuffix + path.extname(file.originalname));
+        const prefix = file.fieldname === 'images' ? 'product-' : 'doc-';
+        cb(null, prefix + uniqueSuffix + path.extname(file.originalname));
     }
 });
 
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
+const fileFilter = (req, file, cb) => {
+    if (file.fieldname === 'images') {
         const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
         if (allowedTypes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Geçersiz dosya tipi'));
+            cb(new Error('Geçersiz resim formatı. Sadece JPEG, PNG ve WEBP kabul edilir.'));
+        }
+    } else if (file.fieldname === 'documents') {
+        const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Geçersiz belge formatı. Sadece PDF, JPEG ve PNG kabul edilir.'));
         }
     }
+};
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    fileFilter: fileFilter
 });
 
 // Dashboard
@@ -51,13 +66,19 @@ router.get('/dashboard', verifyManufacturer, async (req, res) => {
             .sort({ createdAt: -1 })
             .limit(5);
 
+        // Son giriş tarihini güncelle
+        req.manufacturer.lastLogin = new Date();
+        await req.manufacturer.save();
+
         res.json({
             totalProducts,
             outOfStock,
             recentProducts,
             manufacturer: {
                 companyName: req.manufacturer.companyName,
-                email: req.manufacturer.email
+                email: req.manufacturer.email,
+                businessArea: req.manufacturer.businessArea,
+                lastLogin: req.manufacturer.lastLogin
             }
         });
     } catch (error) {
@@ -68,24 +89,34 @@ router.get('/dashboard', verifyManufacturer, async (req, res) => {
 // Ürünleri listele
 router.get('/products', verifyManufacturer, async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '' } = req.query;
+        const { page = 1, limit = 10, search = '', category = '' } = req.query;
         
         const query = { manufacturer: req.manufacturer._id };
+        
         if (search) {
-            query.name = { $regex: search, $options: 'i' };
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        if (category) {
+            query.category = category;
         }
 
         const products = await Product.find(query)
             .sort({ createdAt: -1 })
             .limit(limit * 1)
-            .skip((page - 1) * limit);
+            .skip((page - 1) * limit)
+            .select('-manufacturer'); // manufacturer bilgisini çıkar
 
         const count = await Product.countDocuments(query);
 
         res.json({
             products,
             totalPages: Math.ceil(count / limit),
-            currentPage: page
+            currentPage: parseInt(page),
+            totalProducts: count
         });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -127,6 +158,73 @@ router.post('/products', verifyManufacturer, upload.array('images', 5), async (r
     }
 });
 
+// Ürün güncelle
+router.put('/products/:id', verifyManufacturer, upload.array('images', 5), async (req, res) => {
+    try {
+        const product = await Product.findOne({
+            _id: req.params.id,
+            manufacturer: req.manufacturer._id
+        });
+
+        if (!product) {
+            return res.status(404).json({ message: 'Ürün bulunamadı' });
+        }
+
+        const updates = Object.keys(req.body);
+        const allowedUpdates = ['name', 'description', 'price', 'category', 'stock'];
+        updates.forEach(update => {
+            if (allowedUpdates.includes(update)) {
+                product[update] = req.body[update];
+            }
+        });
+
+        if (req.files && req.files.length > 0) {
+            // Eski resimleri sil
+            product.images.forEach(image => {
+                const filePath = path.join(__dirname, '..', image);
+                fs.unlink(filePath, err => {
+                    if (err) console.error('Dosya silinirken hata:', err);
+                });
+            });
+
+            // Yeni resimleri ekle
+            product.images = req.files.map(file => `/uploads/products/${file.filename}`);
+        }
+
+        await product.save();
+        res.json(product);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Ürün sil
+router.delete('/products/:id', verifyManufacturer, async (req, res) => {
+    try {
+        const product = await Product.findOne({
+            _id: req.params.id,
+            manufacturer: req.manufacturer._id
+        });
+
+        if (!product) {
+            return res.status(404).json({ message: 'Ürün bulunamadı' });
+        }
+
+        // Ürün resimlerini sil
+        product.images.forEach(image => {
+            const filePath = path.join(__dirname, '..', image);
+            fs.unlink(filePath, err => {
+                if (err) console.error('Dosya silinirken hata:', err);
+            });
+        });
+
+        await product.deleteOne();
+        res.json({ message: 'Ürün başarıyla silindi' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 // Profil güncelle
 router.put('/profile', verifyManufacturer, upload.array('documents', 5), async (req, res) => {
     try {
@@ -155,13 +253,10 @@ router.put('/profile', verifyManufacturer, upload.array('documents', 5), async (
 // Çıkış yap
 router.post('/logout', verifyManufacturer, async (req, res) => {
     try {
-        const blacklistedToken = new BlacklistedToken({
-            token: req.token
-        });
-        await blacklistedToken.save();
+        await req.manufacturer.removeToken(req.token);
         res.json({ message: 'Başarıyla çıkış yapıldı' });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: 'Çıkış yapılırken hata oluştu' });
     }
 });
 
