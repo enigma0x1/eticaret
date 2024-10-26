@@ -45,6 +45,9 @@ app.use((req, res, next) => {
     next();
 });
 
+// Trust Proxy Setting
+app.set('trust proxy', 1);
+
 // Upload Directories Setup
 const uploadDir = path.join(__dirname, 'uploads');
 const productUploadDir = path.join(__dirname, 'uploads/products');
