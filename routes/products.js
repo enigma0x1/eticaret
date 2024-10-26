@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Product = require('../models/Product');
-const verifyToken = require('../middleware/auth');
+const { verifyToken, verifyManufacturer } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
 
@@ -17,14 +17,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Manufacturer kontrolü middleware
-const isManufacturer = async (req, res, next) => {
-    if (req.user.userType !== 'manufacturer') {
-        return res.status(403).json({ message: 'Bu işlem için üretici yetkisi gerekli' });
-    }
-    next();
-};
-
 // Tüm ürünleri getir (public)
 router.get('/', async (req, res) => {
     try {
@@ -36,7 +28,7 @@ router.get('/', async (req, res) => {
 });
 
 // Manufacturer'ın kendi ürünlerini getir
-router.get('/my-products', verifyToken, isManufacturer, async (req, res) => {
+router.get('/my-products', verifyManufacturer, async (req, res) => {
     try {
         const products = await Product.find({ manufacturer: req.user.id });
         res.json(products);
@@ -124,7 +116,7 @@ router.get('/filter', async (req, res) => {
 });
 
 // Yeni ürün ekle (sadece manufacturer)
-router.post('/', verifyToken, isManufacturer, upload.single('image'), async (req, res) => {
+router.post('/', verifyManufacturer, upload.single('image'), async (req, res) => {
     const product = new Product({
         ...req.body,
         manufacturer: req.user.id,
@@ -140,7 +132,7 @@ router.post('/', verifyToken, isManufacturer, upload.single('image'), async (req
 });
 
 // Ürün güncelle (sadece kendi ürünlerini)
-router.put('/:id', verifyToken, isManufacturer, async (req, res) => {
+router.put('/:id', verifyManufacturer, async (req, res) => {
     try {
         const product = await Product.findOne({ 
             _id: req.params.id,
@@ -160,7 +152,7 @@ router.put('/:id', verifyToken, isManufacturer, async (req, res) => {
 });
 
 // Ürün sil (sadece kendi ürünlerini)
-router.delete('/:id', verifyToken, isManufacturer, async (req, res) => {
+router.delete('/:id', verifyManufacturer, async (req, res) => {
     try {
         const product = await Product.findOne({ 
             _id: req.params.id,
