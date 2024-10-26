@@ -71,6 +71,7 @@ router.get('/dashboard', verifyManufacturer, async (req, res) => {
         await req.manufacturer.save();
 
         res.json({
+            success: true,
             totalProducts,
             outOfStock,
             recentProducts,
@@ -82,84 +83,78 @@ router.get('/dashboard', verifyManufacturer, async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Dashboard error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
 // Ürünleri listele
 router.get('/products', verifyManufacturer, async (req, res) => {
     try {
-        const { page = 1, limit = 10, search = '', category = '' } = req.query;
-        
-        const query = { manufacturer: req.manufacturer._id };
-        
-        if (search) {
-            query.$or = [
-                { name: { $regex: search, $options: 'i' } },
-                { description: { $regex: search, $options: 'i' } }
-            ];
-        }
-
-        if (category) {
-            query.category = category;
-        }
-
-        const products = await Product.find(query)
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit)
-            .select('-manufacturer'); // manufacturer bilgisini çıkar
-
-        const count = await Product.countDocuments(query);
+        const products = await Product.find({ manufacturer: req.manufacturer._id })
+            .sort({ createdAt: -1 });
 
         res.json({
-            products,
-            totalPages: Math.ceil(count / limit),
-            currentPage: parseInt(page),
-            totalProducts: count
+            success: true,
+            products
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Products fetch error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
 // Yeni ürün ekle
-router.post('/products', verifyManufacturer, upload.array('images', 5), async (req, res) => {
+router.post('/products', verifyManufacturer, upload.single('image'), async (req, res) => {
     try {
-        const { name, description, price, category, stock } = req.body;
-        
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ message: 'En az bir ürün fotoğrafı gereklidir' });
+        console.log('Received product data:', req.body);
+        console.log('Received file:', req.file);
+
+        if (!req.file) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Ürün görseli gereklidir' 
+            });
         }
 
-        const imageUrls = req.files.map(file => `/uploads/products/${file.filename}`);
-
         const product = new Product({
-            name,
-            description,
-            price: Number(price),
-            category,
-            stock: Number(stock),
-            images: imageUrls,
-            manufacturer: req.manufacturer._id
+            title: req.body.title,
+            description: req.body.description,
+            price: Number(req.body.price),
+            category: req.body.category,
+            modelFormats: JSON.parse(req.body.modelFormats || '["3D"]'),
+            manufacturer: req.manufacturer._id,
+            image: `/uploads/products/${req.file.filename}`
         });
 
         await product.save();
-        res.status(201).json(product);
+        
+        res.status(201).json({
+            success: true,
+            product
+        });
     } catch (error) {
-        if (req.files) {
-            req.files.forEach(file => {
-                fs.unlink(file.path, err => {
-                    if (err) console.error('Dosya silinirken hata:', err);
-                });
+        console.error('Product creation error:', error);
+        if (req.file) {
+            fs.unlink(req.file.path, err => {
+                if (err) console.error('File deletion error:', err);
             });
         }
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
 // Ürün güncelle
-router.put('/products/:id', verifyManufacturer, upload.array('images', 5), async (req, res) => {
+router.put('/products/:id', verifyManufacturer, upload.single('image'), async (req, res) => {
     try {
         const product = await Product.findOne({
             _id: req.params.id,
@@ -167,34 +162,47 @@ router.put('/products/:id', verifyManufacturer, upload.array('images', 5), async
         });
 
         if (!product) {
-            return res.status(404).json({ message: 'Ürün bulunamadı' });
+            return res.status(404).json({ 
+                success: false,
+                message: 'Ürün bulunamadı' 
+            });
         }
 
-        const updates = Object.keys(req.body);
-        const allowedUpdates = ['name', 'description', 'price', 'category', 'stock'];
-        updates.forEach(update => {
-            if (allowedUpdates.includes(update)) {
-                product[update] = req.body[update];
+        // Temel alanları güncelle
+        product.title = req.body.title || product.title;
+        product.description = req.body.description || product.description;
+        product.price = req.body.price || product.price;
+        product.category = req.body.category || product.category;
+        if (req.body.modelFormats) {
+            product.modelFormats = JSON.parse(req.body.modelFormats);
+        }
+
+        // Yeni resim yüklendiyse
+        if (req.file) {
+            // Eski resmi sil
+            if (product.image) {
+                const oldImagePath = path.join(__dirname, '..', product.image);
+                if (fs.existsSync(oldImagePath)) {
+                    fs.unlink(oldImagePath, err => {
+                        if (err) console.error('Old image deletion error:', err);
+                    });
+                }
             }
-        });
-
-        if (req.files && req.files.length > 0) {
-            // Eski resimleri sil
-            product.images.forEach(image => {
-                const filePath = path.join(__dirname, '..', image);
-                fs.unlink(filePath, err => {
-                    if (err) console.error('Dosya silinirken hata:', err);
-                });
-            });
-
-            // Yeni resimleri ekle
-            product.images = req.files.map(file => `/uploads/products/${file.filename}`);
+            product.image = `/uploads/products/${req.file.filename}`;
         }
 
         await product.save();
-        res.json(product);
+        
+        res.json({
+            success: true,
+            product
+        });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        console.error('Product update error:', error);
+        res.status(400).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
@@ -207,21 +215,34 @@ router.delete('/products/:id', verifyManufacturer, async (req, res) => {
         });
 
         if (!product) {
-            return res.status(404).json({ message: 'Ürün bulunamadı' });
+            return res.status(404).json({ 
+                success: false,
+                message: 'Ürün bulunamadı' 
+            });
         }
 
-        // Ürün resimlerini sil
-        product.images.forEach(image => {
-            const filePath = path.join(__dirname, '..', image);
-            fs.unlink(filePath, err => {
-                if (err) console.error('Dosya silinirken hata:', err);
-            });
-        });
+        // Ürün resmini sil
+        if (product.image) {
+            const imagePath = path.join(__dirname, '..', product.image);
+            if (fs.existsSync(imagePath)) {
+                fs.unlink(imagePath, err => {
+                    if (err) console.error('Image deletion error:', err);
+                });
+            }
+        }
 
         await product.deleteOne();
-        res.json({ message: 'Ürün başarıyla silindi' });
+        
+        res.json({
+            success: true,
+            message: 'Ürün başarıyla silindi'
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Product deletion error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
@@ -233,7 +254,10 @@ router.put('/profile', verifyManufacturer, upload.array('documents', 5), async (
         const isValidOperation = updates.every(update => allowedUpdates.includes(update));
 
         if (!isValidOperation) {
-            return res.status(400).json({ message: 'Geçersiz güncelleme' });
+            return res.status(400).json({ 
+                success: false,
+                message: 'Geçersiz güncelleme' 
+            });
         }
 
         updates.forEach(update => req.manufacturer[update] = req.body[update]);
@@ -244,19 +268,52 @@ router.put('/profile', verifyManufacturer, upload.array('documents', 5), async (
         }
 
         await req.manufacturer.save();
-        res.json(req.manufacturer);
+        
+        res.json({
+            success: true,
+            manufacturer: req.manufacturer
+        });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        console.error('Profile update error:', error);
+        res.status(400).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
-// Çıkış yap
-router.post('/logout', verifyManufacturer, async (req, res) => {
+// Belge sil
+router.delete('/documents', verifyManufacturer, async (req, res) => {
     try {
-        await req.manufacturer.removeToken(req.token);
-        res.json({ message: 'Başarıyla çıkış yapıldı' });
+        const { documentPath } = req.body;
+        
+        if (!documentPath) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Belge yolu gereklidir' 
+            });
+        }
+
+        // Belgeyi dosya sisteminden sil
+        const fullPath = path.join(__dirname, '..', documentPath);
+        if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+        }
+
+        // Belgeyi veritabanından kaldır
+        req.manufacturer.documents = req.manufacturer.documents.filter(doc => doc !== documentPath);
+        await req.manufacturer.save();
+
+        res.json({
+            success: true,
+            message: 'Belge başarıyla silindi'
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Çıkış yapılırken hata oluştu' });
+        console.error('Document deletion error:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 });
 
