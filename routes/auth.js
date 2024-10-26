@@ -44,14 +44,109 @@ const upload = multer({
     }
 });
 
-// Login routes aynı kalacak...
+// Üretici Login
+router.post('/manufacturer/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const manufacturer = await Manufacturer.findOne({ email });
+        if (!manufacturer) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email veya şifre hatalı'
+            });
+        }
+
+        const isMatch = await bcrypt.compare(password, manufacturer.password);
+        if (!isMatch) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email veya şifre hatalı'
+            });
+        }
+
+        const token = jwt.sign(
+            { 
+                _id: manufacturer._id.toString(),
+                userType: 'manufacturer'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            success: true,
+            userType: 'manufacturer',
+            user: {
+                id: manufacturer._id,
+                email: manufacturer.email,
+                companyName: manufacturer.companyName
+            },
+            token
+        });
+    } catch (error) {
+        console.error('Manufacturer login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Sunucu hatası'
+        });
+    }
+});
+
+// Profesyonel Login
+router.post('/professional/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const professional = await Professional.findOne({ email });
+        if (!professional) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email veya şifre hatalı'
+            });
+        }
+
+        const isMatch = await bcrypt.compare(password, professional.password);
+        if (!isMatch) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email veya şifre hatalı'
+            });
+        }
+
+        const token = jwt.sign(
+            { 
+                _id: professional._id.toString(),
+                userType: 'professional'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            success: true,
+            userType: 'professional',
+            user: {
+                id: professional._id,
+                email: professional.email,
+                fullName: professional.fullName
+            },
+            token
+        });
+    } catch (error) {
+        console.error('Professional login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Sunucu hatası'
+        });
+    }
+});
 
 // Üretici Kaydı
 router.post('/manufacturer/register', upload.array('documents', 5), async (req, res) => {
     try {
         const { companyName, email, password, address, phone, businessArea, taxNumber, contactName } = req.body;
 
-        // Email kontrolü
         const existingManufacturer = await Manufacturer.findOne({ email });
         if (existingManufacturer) {
             return res.status(400).json({ 
@@ -60,7 +155,6 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
             });
         }
 
-        // Dosya kontrolü
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -70,7 +164,6 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
 
         const documentPaths = req.files.map(file => `/uploads/documents/${file.filename}`);
 
-        // Yeni üretici oluştur
         const manufacturer = new Manufacturer({
             companyName,
             email,
@@ -105,7 +198,6 @@ router.post('/manufacturer/register', upload.array('documents', 5), async (req, 
             token
         });
     } catch (error) {
-        // Yüklenen dosyaları temizle
         if (req.files) {
             req.files.forEach(file => {
                 fs.unlink(file.path, err => {
@@ -127,7 +219,6 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
     try {
         const { fullName, email, password, profession } = req.body;
 
-        // Email kontrolü
         const existingProfessional = await Professional.findOne({ email });
         if (existingProfessional) {
             return res.status(400).json({ 
@@ -136,7 +227,6 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
             });
         }
 
-        // Diploma kontrolü
         if (!req.file) {
             return res.status(400).json({
                 success: false,
@@ -146,7 +236,6 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
 
         const diplomaPath = `/uploads/diplomas/${req.file.filename}`;
 
-        // Yeni profesyonel oluştur
         const professional = new Professional({
             fullName,
             email,
@@ -177,7 +266,6 @@ router.post('/professional/register', upload.single('diploma'), async (req, res)
             token
         });
     } catch (error) {
-        // Yüklenen dosyayı temizle
         if (req.file) {
             fs.unlink(req.file.path, err => {
                 if (err) console.error('Dosya silinirken hata:', err);
